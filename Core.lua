@@ -172,8 +172,8 @@ end
 --   - Lore & Naval Fleet Route Overlay (ARTWORK sublevel 6)
 --   - 12-Cell Localized Label Atlas Sprites (OVERLAY sublevel 7)
 -- ============================================================================
-local ATLAS_CELL_W_NORM = 512.0 / 3072.0
-local ATLAS_CELL_H_NORM = 168.0 / 2048.0
+local ATLAS_CELL_W_NORM = 704.0 / 3072.0
+local ATLAS_CELL_H_NORM = 231.0 / 2048.0
 
 local function SetAtlasCellTexCoord(tex, cellIdx)
     local col = cellIdx % 2
