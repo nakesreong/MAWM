@@ -6,6 +6,7 @@ local COSMIC_MAP_ID  = 946
 
 local DEFAULTS = {
     enabled  = true,
+    layout   = "mawm",  -- "mawm" (Full Geodesy), "hybrid" (BI+Zandalar shifted, KA+DI stock), or "blizz" (Blizzard spots + True Proportions)
     style    = "blizz", -- "blizz" (Official 4K CASC Realigned) or "carto" (Cartographer's Parchment)
     showLore = false,   -- Toggleable Daelin's Fleet Route & Geodesy Notes overlay
     lang     = "auto",  -- "auto" (detect from WoW client GetLocale()) or explicit: en/ru/de/fr/es/it/pt/ko/zhcn/zhtw
@@ -54,6 +55,33 @@ local function GetActiveLang()
     return GetClientLang()
 end
 
+local function GetActiveLayoutKey()
+    local k = MAWM_DB and MAWM_DB.layout or "mawm"
+    if MAWM.LAYOUTS and MAWM.LAYOUTS[k] then
+        return k
+    end
+    return "mawm"
+end
+
+local function GetActiveLayout()
+    local k = GetActiveLayoutKey()
+    return MAWM.LAYOUTS[k], k
+end
+
+local function CycleLayoutMode()
+    local cur = GetActiveLayoutKey()
+    local order = MAWM.LAYOUT_ORDER or { "mawm", "hybrid", "blizz" }
+    for i, k in ipairs(order) do
+        if k == cur then
+            local nextIdx = (i % #order) + 1
+            MAWM_DB.layout = order[nextIdx]
+            return MAWM_DB.layout
+        end
+    end
+    MAWM_DB.layout = "mawm"
+    return MAWM_DB.layout
+end
+
 local function IsRU()
     return GetActiveLang() == "ru"
 end
@@ -62,21 +90,11 @@ local function L(en, ru)
     return IsRU() and ru or en
 end
 
-local function GetContinentDisplayName(cont)
-    if cont and cont.uiMapID and C_Map and C_Map.GetMapInfo then
-        local info = C_Map.GetMapInfo(cont.uiMapID)
-        if info and info.name and info.name ~= "" then
-            return info.name
-        end
-    end
-    return L(cont.fallbackNameEN, cont.fallbackNameRU)
-end
-
 -- ============================================================================
--- Hit-Testing on Normalized [0..1] Azeroth Canvas
+-- Hit-Testing on Normalized [0..1] Azeroth Canvas (Layout-Aware!)
 -- ============================================================================
 local function GetHoveredLoreBadge(nx, ny)
-    if not (MAWM_DB and MAWM_DB.showLore) then
+    if not (MAWM_DB and MAWM_DB.showLore and GetActiveLayoutKey() == "mawm") then
         return nil
     end
     for _, badge in ipairs(MAWM.LORE_BADGES) do
@@ -89,14 +107,22 @@ local function GetHoveredLoreBadge(nx, ny)
     return nil
 end
 
+local function GetContinentBoxInActiveLayout(cont)
+    local layout = GetActiveLayout()
+    if layout and layout.continents and layout.continents[cont.key] then
+        return layout.continents[cont.key].box
+    end
+    return cont.box
+end
+
 local function GetHoveredContinent(nx, ny)
     for _, cont in ipairs(MAWM.CONTINENTS) do
-        local h = cont.hit
-        if nx >= h[1] and nx <= h[3] and ny >= h[2] and ny <= h[4] then
-            return cont
+        local b = GetContinentBoxInActiveLayout(cont)
+        if b and nx >= b[1] and nx <= b[3] and ny >= b[2] and ny <= b[4] then
+            return cont, b
         end
     end
-    return nil
+    return nil, nil
 end
 
 -- ============================================================================
@@ -139,8 +165,26 @@ local function SetStockHighlightSuppressed(suppress)
 end
 
 -- ============================================================================
--- Build Canvas Overlay & 3x2 Power-of-Two Tile Grid
+-- Build Canvas Overlay:
+--   - 3x2 Power-of-Two Ocean Background Tile Grid (BACKGROUND sublevel 1)
+--   - 10 Modular Continent Sprites (ARTWORK sublevel 2)
+--   - Pulsing Golden Coastline Highlight (ARTWORK sublevel 4)
+--   - Lore & Naval Fleet Route Overlay (ARTWORK sublevel 6)
+--   - 12-Cell Localized Label Atlas Sprites (OVERLAY sublevel 7)
 -- ============================================================================
+local ATLAS_CELL_W_NORM = 512.0 / 3072.0
+local ATLAS_CELL_H_NORM = 168.0 / 2048.0
+
+local function SetAtlasCellTexCoord(tex, cellIdx)
+    local col = cellIdx % 2
+    local row = math.floor(cellIdx / 2)
+    local u1 = col * 0.5
+    local u2 = (col + 1) * 0.5
+    local v1 = (row * 168.0) / 1024.0
+    local v2 = ((row + 1) * 168.0) / 1024.0
+    tex:SetTexCoord(u1, u2, v1, v2)
+end
+
 function MAWM:EnsureCanvasOverlay()
     if self.CanvasFrame then
         return self.CanvasFrame
@@ -153,12 +197,11 @@ function MAWM:EnsureCanvasOverlay()
     local f = CreateFrame("Frame", "MAWM_CanvasOverlayFrame", child)
     f:SetAllPoints(child)
     f:SetFrameStrata(child:GetFrameStrata())
-    -- Elevate frame level on mapID 947 so stock highlight pins and misplaced continent summary pins stay underneath
     f:SetFrameLevel(math.min(9500, child:GetFrameLevel() + 2500))
     f:EnableMouse(true)
     f:EnableMouseWheel(true)
 
-    -- 3x2 grid of 1024x1024 lossless RLE TGA tiles (= 3072x2048, exact 3:2 aspect ratio)
+    -- 1. 3x2 grid of 1024x1024 lossless RLE TGA ocean background tiles (= 3072x2048, exact 3:2 aspect ratio)
     f.tiles = {}
     for row = 0, 1 do
         f.tiles[row] = {}
@@ -169,34 +212,48 @@ function MAWM:EnsureCanvasOverlay()
         end
     end
 
-    -- Authentic Blizzard Friz Quadrata Typography Overlay (labels_ru.tga / labels_en.tga)
-    -- Placed on the very top layer (OVERLAY sublevel 7) so labels always render above continents and highlights!
-    local labelsTex = f:CreateTexture(nil, "OVERLAY", nil, 7)
-    labelsTex:SetAllPoints(f)
-    labelsTex:SetTexCoord(0, 1, 0, 1)
-    f.LabelsTex = labelsTex
+    -- 2. 10 Modular Continent Sprites (positioned dynamically according to active Layout Mode!)
+    f.contSprites = {}
+    f.labelSprites = {}
+    for _, cont in ipairs(MAWM.CONTINENTS) do
+        local cTex = f:CreateTexture(nil, "ARTWORK", nil, 2)
+        cTex:SetTexCoord(0, 1, 0, 1)
+        f.contSprites[cont.key] = cTex
 
-    -- Pixel-Locked Golden Coastline Highlight Texture (hl_<key>.tga, 1:1 bbox with continent sprite)
+        local lTex = f:CreateTexture(nil, "OVERLAY", nil, 7)
+        SetAtlasCellTexCoord(lTex, cont.atlasCell)
+        f.labelSprites[cont.key] = lTex
+    end
+
+    -- Sea Labels (The Veiled Sea & The Forbidding Sea)
+    f.seaLabelSprites = {}
+    for i, sea in ipairs(MAWM.SEA_LABELS) do
+        local sTex = f:CreateTexture(nil, "OVERLAY", nil, 7)
+        SetAtlasCellTexCoord(sTex, sea.atlasCell)
+        f.seaLabelSprites[i] = sTex
+    end
+
+    -- 3. Pixel-Locked Golden Coastline Highlight Texture (hl_<key>.tga, 1:1 bbox with continent sprite)
     local hlTex = f:CreateTexture(nil, "ARTWORK", nil, 4)
     hlTex:SetBlendMode("ADD")
     hlTex:SetTexCoord(0, 1, 0, 1)
     hlTex:Hide()
     f.HighlightTex = hlTex
 
-    -- Toggleable Transparent Lore & Naval Fleet Route Overlay (2048x1024 TGA)
+    -- 4. Toggleable Transparent Lore & Naval Fleet Route Overlay (2048x1024 TGA)
     local loreTex = f:CreateTexture(nil, "ARTWORK", nil, 6)
     loreTex:SetAllPoints(f)
     loreTex:SetTexture(TEX_DIR .. "lore_overlay")
     loreTex:Hide()
     f.LoreTex = loreTex
 
-    -- Subtle bottom-left watermark badge on the map
+    -- 5. Subtle bottom-left watermark badge on the map
     local badgeText = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     badgeText:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 18, 12)
     badgeText:SetTextColor(0.92, 0.80, 0.48, 0.85)
     f.BadgeText = badgeText
 
-    -- Layout update when Child changes size
+    -- Layout update when Child changes size or user switches Layout / Style / Language
     function f:UpdateTileLayout()
         local w, h = self:GetWidth(), self:GetHeight()
         if not w or w <= 0 or not h or h <= 0 then
@@ -206,7 +263,9 @@ function MAWM:EnsureCanvasOverlay()
 
         local tileW = w / 3.0
         local tileH = h / 2.0
-        local prefix = (MAWM_DB and MAWM_DB.style == "carto") and "carto" or "blizz"
+        local isCarto = (MAWM_DB and MAWM_DB.style == "carto")
+        local prefix = isCarto and "carto" or "blizz"
+        local spPrefix = isCarto and "sp_carto_" or "sp_"
 
         for row = 0, 1 do
             for col = 0, 2 do
@@ -220,24 +279,62 @@ function MAWM:EnsureCanvasOverlay()
 
         local activeLang = GetActiveLang()
         local langInfo = VALID_LANGS[activeLang] or VALID_LANGS.en
-        local langFile = "labels_" .. activeLang
-        self.LabelsTex:SetTexture(TEX_DIR .. langFile)
-        self.LabelsTex:Show()
+        local langAtlasPath = TEX_DIR .. "labels_" .. activeLang
 
-        if MAWM_DB and MAWM_DB.showLore then
+        local layout, layoutKey = GetActiveLayout()
+        local cellW = w * ATLAS_CELL_W_NORM
+        local cellH = h * ATLAS_CELL_H_NORM
+
+        for _, cont in ipairs(MAWM.CONTINENTS) do
+            local cSpec = (layout and layout.continents and layout.continents[cont.key]) or cont
+            local b = cSpec.box or cont.box
+            local lp = cSpec.label or { (b[1] + b[3]) * 0.5, (b[2] + b[4]) * 0.5 }
+
+            local cTex = self.contSprites[cont.key]
+            if cTex and b then
+                cTex:ClearAllPoints()
+                cTex:SetPoint("TOPLEFT", self, "TOPLEFT", b[1] * w, -(b[2] * h))
+                cTex:SetSize((b[3] - b[1]) * w, (b[4] - b[2]) * h)
+                cTex:SetTexture(TEX_DIR .. spPrefix .. cont.key)
+                cTex:Show()
+            end
+
+            local lTex = self.labelSprites[cont.key]
+            if lTex and lp then
+                lTex:ClearAllPoints()
+                lTex:SetPoint("CENTER", self, "TOPLEFT", lp[1] * w, -(lp[2] * h))
+                lTex:SetSize(cellW, cellH)
+                lTex:SetTexture(langAtlasPath)
+                lTex:Show()
+            end
+        end
+
+        for i, sea in ipairs(MAWM.SEA_LABELS) do
+            local sTex = self.seaLabelSprites[i]
+            if sTex then
+                sTex:ClearAllPoints()
+                sTex:SetPoint("CENTER", self, "TOPLEFT", sea.x * w, -(sea.y * h))
+                sTex:SetSize(cellW, cellH)
+                sTex:SetTexture(langAtlasPath)
+                sTex:Show()
+            end
+        end
+
+        if MAWM_DB and MAWM_DB.showLore and layoutKey == "mawm" then
             self.LoreTex:Show()
         else
             self.LoreTex:Hide()
         end
 
-        local styleLabel = (prefix == "carto")
-            and L("Cartographer's Parchment", "Пергамент Картографа")
-            or  L("Official 4K CASC Realigned", "Офиц. 4K CASC Геодезия")
+        local layoutLabel = layout and L(layout.nameEN, layout.nameRU) or "MAWM"
+        local styleLabel = isCarto
+            and L("Parchment", "Пергамент")
+            or  L("4K Blizz", "4K Близз")
         local langTag = " [" .. langInfo.tag .. "]"
-        local loreSuffix = (MAWM_DB and MAWM_DB.showLore)
-            and L(" • [Lore & Fleet Routes ON]", " • [Лор и Маршруты ВКЛ]")
+        local loreSuffix = (MAWM_DB and MAWM_DB.showLore and layoutKey == "mawm")
+            and L(" • [Lore & Fleet ON]", " • [Лор и Флот ВКЛ]")
             or ""
-        self.BadgeText:SetText("|cffffd100MAWM v" .. MAWM.VERSION .. "|r — " .. styleLabel .. langTag .. loreSuffix)
+        self.BadgeText:SetText("|cffffd100MAWM v" .. MAWM.VERSION .. "|r — " .. layoutLabel .. " • " .. styleLabel .. langTag .. loreSuffix)
     end
 
     f:SetScript("OnSizeChanged", function(self)
@@ -333,7 +430,7 @@ function MAWM:EnsureCanvasOverlay()
             return
         end
 
-        -- 1. Check if hovering a Lore Badge first (when Lore Overlay is active)
+        -- 1. Check if hovering a Lore Badge first (when Lore Overlay is active in MAWM layout)
         local badge = GetHoveredLoreBadge(nx, ny)
         if badge then
             self.HighlightTex:Hide()
@@ -345,12 +442,11 @@ function MAWM:EnsureCanvasOverlay()
             return
         end
 
-        -- 2. Check if hovering a Realigned Continent (Golden Coastline Highlight ONLY, no tooltip!)
-        local cont = GetHoveredContinent(nx, ny)
-        if cont then
+        -- 2. Check if hovering a Continent in the active Layout Mode (Golden Coastline Highlight ONLY, no tooltip!)
+        local cont, b = GetHoveredContinent(nx, ny)
+        if cont and b then
             local w, h = self:GetWidth(), self:GetHeight()
-            local b = cont.box
-            if w and w > 0 and h and h > 0 and b and cont.hlTex then
+            if w and w > 0 and h and h > 0 and cont.hlTex then
                 self.HighlightTex:ClearAllPoints()
                 self.HighlightTex:SetPoint("TOPLEFT", self, "TOPLEFT", b[1] * w, -(b[2] * h))
                 self.HighlightTex:SetSize((b[3] - b[1]) * w, (b[4] - b[2]) * h)
@@ -396,7 +492,7 @@ function MAWM:EnsureToggleButton()
     end
 
     local btn = CreateFrame("Button", "MAWM_WorldMapToggleButton", WorldMapFrame.ScrollContainer, "BackdropTemplate")
-    btn:SetSize(206, 28)
+    btn:SetSize(236, 28)
     -- Anchored at TOPRIGHT (-48, -10) so it never overlaps top-left zone widgets (e.g. DecorVendor)
     btn:SetPoint("TOPRIGHT", WorldMapFrame.ScrollContainer, "TOPRIGHT", -48, -10)
     btn:SetFrameStrata("HIGH")
@@ -431,20 +527,27 @@ function MAWM:EnsureToggleButton()
             self.Label:SetText("|cffaaaaaaMAWM: " .. L("OFF (Stock)", "ВЫКЛ (Сток)") .. "|r")
         else
             self:SetBackdropBorderColor(0.92, 0.74, 0.28, 1.0)
+            local layout = GetActiveLayout()
+            local layShort = layout and L(layout.shortEN, layout.shortRU) or "MAWM"
             local st = (MAWM_DB.style == "carto")
-                and L("Parchment", "Пергамент")
-                or  L("4K Blizz", "4K Близз")
+                and L("Parch", "Перг")
+                or  L("4K", "4K")
             local activeLang = GetActiveLang()
             local langInfo = VALID_LANGS[activeLang] or VALID_LANGS.en
             local langBadge = " |cffffd100[" .. langInfo.tag .. "]|r"
-            local loreTag = MAWM_DB.showLore and " |cff55ddff[Lore]|r" or ""
-            self.Label:SetText("|cffffd100MAWM:|r |cff55ff55" .. st .. "|r" .. langBadge .. loreTag)
+            local loreTag = (MAWM_DB.showLore and GetActiveLayoutKey() == "mawm") and " |cff55ddff[L]|r" or ""
+            self.Label:SetText("|cffffd100MAWM:|r |cff55ff55" .. layShort .. " • " .. st .. "|r" .. langBadge .. loreTag)
         end
     end
 
     btn:SetScript("OnClick", function(self, button)
         if not MAWM_DB then return end
-        if IsAltKeyDown() then
+        if IsControlKeyDown() then
+            CycleLayoutMode()
+            if not MAWM_DB.enabled then
+                MAWM_DB.enabled = true
+            end
+        elseif IsAltKeyDown() then
             local clientLang = GetClientLang()
             local curLang = GetActiveLang()
             if clientLang ~= "en" then
@@ -457,11 +560,14 @@ function MAWM:EnsureToggleButton()
             end
         elseif IsShiftKeyDown() or button == "MiddleButton" then
             MAWM_DB.showLore = not MAWM_DB.showLore
+            if MAWM_DB.showLore then
+                MAWM_DB.layout = "mawm"
+            end
             if not MAWM_DB.enabled then
                 MAWM_DB.enabled = true
             end
         elseif button == "RightButton" then
-            MAWM_DB.style = (MAWM_DB.style == "carto") and "blizz" or "carto"
+            CycleLayoutMode()
             if not MAWM_DB.enabled then
                 MAWM_DB.enabled = true
             end
@@ -488,26 +594,29 @@ function MAWM:EnsureToggleButton()
         GameTooltip:ClearLines()
         GameTooltip:AddLine("|cffffd100MAWM — Most Accurate World Map|r v" .. MAWM.VERSION)
         GameTooltip:AddLine(L(
-            "Lore-accurate, tectonically realigned Azeroth World Map",
-            "Лорно-точная геодезическая карта мира Азерота"
+            "Lore-accurate continent proportions & 3 selectable geodesy layouts",
+            "Истинные пропорции материков и 3 режима геодезической раскладки"
         ), 0.85, 0.82, 0.72, true)
         GameTooltip:AddLine(" ")
 
         local statusStr = MAWM_DB.enabled
-            and L("|cff55ff55ENABLED (Realigned Azeroth)|r", "|cff55ff55ВКЛЮЧЕНА (Исправленный Азерот)|r")
+            and L("|cff55ff55ENABLED|r", "|cff55ff55ВКЛЮЧЕНА|r")
             or  L("|cffff6666DISABLED (Stock Blizzard Map)|r", "|cffff6666ВЫКЛЮЧЕНА (Стандартная карта)|r")
+        local layout = GetActiveLayout()
+        local layoutStr = "|cff55ff55" .. (layout and L(layout.nameEN, layout.nameRU) or "MAWM") .. "|r"
         local styleStr = (MAWM_DB.style == "carto")
             and L("Cartographer's Illustrated Parchment", "Иллюстрированный пергамент Картографа")
-            or  L("Official 4K Blizzard CASC Realigned", "Официальная 4K Blizzard CASC")
+            or  L("Official 4K Blizzard CASC", "Официальная 4K Blizzard CASC")
         local activeLang = GetActiveLang()
         local langInfo = VALID_LANGS[activeLang] or VALID_LANGS.en
         local isAuto = (not MAWM_DB.lang or MAWM_DB.lang == "auto")
         local langStr = "|cffffd100" .. langInfo.name .. (isAuto and " (Client Auto)" or "") .. "|r"
-        local loreStr = MAWM_DB.showLore
+        local loreStr = (MAWM_DB.showLore and GetActiveLayoutKey() == "mawm")
             and L("|cff55ddffON (Daelin's Fleet & #1-#8 Geodesy Pins)|r", "|cff55ddffВКЛ (Флот Праудмура и пины геодезии №1-№8)|r")
             or  L("|cff888888OFF|r", "|cff888888ВЫКЛ|r")
 
         GameTooltip:AddDoubleLine(L("Status:", "Статус:"), statusStr, 1, 0.82, 0, 1, 1, 1)
+        GameTooltip:AddDoubleLine(L("Layout Mode:", "Режим раскладки:"), layoutStr, 1, 0.82, 0, 1, 1, 1)
         GameTooltip:AddDoubleLine(L("Map Style:", "Стиль карты:"), styleStr, 1, 0.82, 0, 0.9, 0.9, 0.9)
         GameTooltip:AddDoubleLine(L("Map Language:", "Язык подписей:"), langStr, 1, 0.82, 0, 1, 1, 1)
         GameTooltip:AddDoubleLine(L("Lore & Fleet Overlay:", "Лор-маршруты и флот:"), loreStr, 1, 0.82, 0, 1, 1, 1)
@@ -517,9 +626,10 @@ function MAWM:EnsureToggleButton()
         else
             GameTooltip:AddLine(L("|cff55ff55Left-Click:|r Jump to Azeroth World Map", "|cff55ff55ЛКМ:|r Открыть глобальную карту Азерота"), 0.9, 0.9, 0.9)
         end
-        GameTooltip:AddLine(L("|cff55ff55Right-Click:|r Switch Style (4K Blizz / Parchment)", "|cff55ff55ПКМ:|r Сменить стиль (4K Близз / Пергамент)"), 0.9, 0.9, 0.9)
+        GameTooltip:AddLine(L("|cff55ff55Right-Click / Ctrl-Click:|r Cycle Layout (MAWM -> Hybrid -> Blizzard)", "|cff55ff55ПКМ / Ctrl+Клик:|r Сменить раскладку (MAWM -> Гибрид -> Blizzard)"), 0.9, 0.9, 0.9)
         GameTooltip:AddLine(L("|cff55ff55Alt-Click:|r Toggle Client Language / EN", "|cff55ff55Alt+Клик:|r Сменить язык карты (Клиент / EN)"), 0.9, 0.9, 0.9)
         GameTooltip:AddLine(L("|cff55ff55Shift-Click / Middle-Click:|r Toggle Lore & Naval Routes", "|cff55ff55Shift+Клик / СКМ:|r Вкл/выкл маршрут флота и лор-заметки"), 0.9, 0.9, 0.9)
+        GameTooltip:AddLine(L("|cff55ff55/mawm style:|r Switch 4K Blizz / Cartographer's Parchment", "|cff55ff55/mawm style:|r Сменить стиль (4K Близз / Пергамент)"), 0.9, 0.9, 0.9)
         GameTooltip:Show()
     end)
 
@@ -592,7 +702,23 @@ SLASH_MAWM1 = "/mawm"
 SLASH_MAWM2 = "/meow"
 SlashCmdList["MAWM"] = function(msg)
     local cmd = string.lower(strtrim(msg or ""))
-    if cmd == "style" or cmd == "theme" then
+    if cmd == "layout" or cmd == "mode" or cmd == "mawm" or cmd == "hybrid" or cmd == "blizz" or cmd == "blizzard" or cmd:match("^layout%s+") then
+        local arg = cmd:match("^layout%s+(%S+)") or cmd
+        if arg == "mawm" then
+            MAWM_DB.layout = "mawm"
+        elseif arg == "hybrid" then
+            MAWM_DB.layout = "hybrid"
+        elseif arg == "blizz" or arg == "blizzard" then
+            MAWM_DB.layout = "blizz"
+        else
+            CycleLayoutMode()
+        end
+        MAWM_DB.enabled = true
+        local layout = GetActiveLayout()
+        print(string.format("|cffffd100[MAWM]|r %s: |cff55ff55%s|r",
+            L("Layout mode switched to", "Режим раскладки переключён на"),
+            layout and L(layout.nameEN, layout.nameRU) or MAWM_DB.layout))
+    elseif cmd == "style" or cmd == "theme" then
         MAWM_DB.style = (MAWM_DB.style == "carto") and "blizz" or "carto"
         MAWM_DB.enabled = true
         print(string.format("|cffffd100[MAWM]|r %s: |cff55ff55%s|r",
@@ -621,6 +747,9 @@ SlashCmdList["MAWM"] = function(msg)
             info.name, info.tag))
     elseif cmd == "lore" or cmd == "route" or cmd == "fleet" then
         MAWM_DB.showLore = not MAWM_DB.showLore
+        if MAWM_DB.showLore then
+            MAWM_DB.layout = "mawm"
+        end
         MAWM_DB.enabled = true
         print(string.format("|cffffd100[MAWM]|r %s: %s",
             L("Lore & Naval Fleet Overlay", "Лор-оверлей и маршрут флота"),
@@ -634,8 +763,9 @@ SlashCmdList["MAWM"] = function(msg)
     elseif cmd == "help" then
         print("|cffffd100[MAWM — Most Accurate World Map]|r " .. L("Commands:", "Команды:"))
         print("  |cff55ff55/mawm|r (or |cff55ff55/meow|r) — " .. L("Toggle Realigned Map ON/OFF", "Вкл/выкл исправленную карту Азерота"))
+        print("  |cff55ff55/mawm layout|r [mawm|hybrid|blizz] — " .. L("Switch between the 3 Geodesy Layout Modes", "Переключить один из 3 режимов раскладки (mawm / hybrid / blizz)"))
         print("  |cff55ff55/mawm style|r — " .. L("Switch between Official 4K Blizzard & Cartographer's Parchment", "Сменить стиль (4K Близз / Пергамент)"))
-        print("  |cff55ff55/mawm lang|r [auto|en|ru|de|fr|es|it|pt|ko|zhcn|zhtw] — " .. L("Switch map labels language (auto-detected from client by default)", "Переключить язык подписей на карте (по умолчанию определяется по клиенту)"))
+        print("  |cff55ff55/mawm lang|r [auto|en|ru|de|fr|es|it|pt|ko|zhcn|zhtw] — " .. L("Switch map labels language", "Переключить язык подписей на карте"))
         print("  |cff55ff55/mawm lore|r — " .. L("Toggle Daelin Proudmoore's Fleet Route & Geodesy Notes", "Вкл/выкл маршрут флота Праудмура и заметки геодезии"))
         print("  |cff55ff55/mawm open|r — " .. L("Open World Map directly to Azeroth (947)", "Открыть карту мира сразу на Азероте"))
         return

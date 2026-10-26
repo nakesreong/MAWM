@@ -1,162 +1,189 @@
 local ADDON_NAME, MAWM = ...
 
-MAWM.VERSION = "1.3.1"
+MAWM.VERSION = "1.4.0"
 MAWM.AZEROTH_MAP_ID = 947
 
 local isRU = (GetLocale() == "ruRU")
 MAWM.isRU = isRU
 
 -- ============================================================================
--- Realigned Azeroth Continent Definitions (UiMapID = 947)
+-- 3 Selectable Geodesy Layout Modes (True Sturmbart Continent Proportions!)
+--   1. "mawm"   : Broken Isles NE of Kalimdor, Zandalar SW ("South America"),
+--                 Khaz Algar North/NE, Dragon Isles SE (Southern Hemisphere)
+--   2. "hybrid" : Broken Isles NE of Kalimdor & Zandalar SW ("South America"),
+--                 while Khaz Algar (SW) & Dragon Isles (NE) stay at Blizzard's spots
+--   3. "blizz"  : All 10 continents at Blizzard's positions, scaled to true
+--                 lore proportions (massive Kalimdor & EK, compact islands)
 -- ============================================================================
--- Every continent's custom highlight texture (`Textures/hl_<key>.tga`) is
--- cropped in Python to the EXACT SAME bounding box (`box`) as the pasted
--- continent sprite on both the 4K Blizzard and 4K Cartographer maps!
--- `origBox` stores the continent's stock Blizzard 970 bounding box so that
--- addon pins / waypoints / markers on UiMapID 947 automatically remap to the
--- realigned continent coordinates!
+MAWM.LAYOUT_ORDER = { "mawm", "hybrid", "blizz" }
+
+MAWM.LAYOUTS = {
+    mawm = {
+        nameEN  = "MAWM Geodesy (Khaz Algar N • Dragon Isles SE)",
+        nameRU  = "Геодезия MAWM (Каз Алгар С • Драконьи ЮВ)",
+        shortEN = "MAWM",
+        shortRU = "MAWM",
+        continents = {
+            Kalimdor        = { box = { 0.1394, 0.2905, 0.3706, 0.7455 }, label = { 0.2680, 0.5180 } },
+            Northrend       = { box = { 0.4163, 0.0860, 0.5737, 0.2640 }, label = { 0.4950, 0.1680 } },
+            BrokenIsles     = { box = { 0.3985, 0.2890, 0.4655, 0.4010 }, label = { 0.4320, 0.3420 } },
+            Maelstrom       = { box = { 0.4473, 0.4225, 0.5527, 0.5775 }, label = { 0.5000, 0.5550 } },
+            KulTiras        = { box = { 0.5827, 0.4155, 0.6533, 0.5205 }, label = { 0.6180, 0.4650 } },
+            KhazAlgar       = { box = { 0.6241, 0.2300, 0.6799, 0.2860 }, label = { 0.6520, 0.3020 } },
+            EasternKingdoms = { box = { 0.6477, 0.2255, 0.8883, 0.7305 }, label = { 0.7650, 0.5620 } },
+            DragonIsles     = { box = { 0.8092, 0.5640, 0.9268, 0.7320 }, label = { 0.8680, 0.6480 } },
+            Zandalar        = { box = { 0.3841, 0.6280, 0.4459, 0.7360 }, label = { 0.4150, 0.6820 } },
+            Pandaria        = { box = { 0.4554, 0.7625, 0.5746, 0.9075 }, label = { 0.5150, 0.8380 } },
+        },
+    },
+    hybrid = {
+        nameEN  = "Hybrid (Broken Isles & Zandalar Shifted • KA & DI Stock)",
+        nameRU  = "Гибрид (Расколотые и Зандалар сдвинуты • КА и ДО у Близз)",
+        shortEN = "Hybrid",
+        shortRU = "Гибрид",
+        continents = {
+            Kalimdor        = { box = { 0.1394, 0.2905, 0.3706, 0.7455 }, label = { 0.2680, 0.5180 } },
+            Northrend       = { box = { 0.4063, 0.0860, 0.5637, 0.2640 }, label = { 0.4850, 0.1680 } },
+            BrokenIsles     = { box = { 0.3985, 0.2890, 0.4655, 0.4010 }, label = { 0.4320, 0.3420 } },
+            Maelstrom       = { box = { 0.4473, 0.4225, 0.5527, 0.5775 }, label = { 0.5000, 0.5550 } },
+            KulTiras        = { box = { 0.5897, 0.4325, 0.6603, 0.5375 }, label = { 0.6250, 0.4820 } },
+            KhazAlgar       = { box = { 0.3171, 0.7670, 0.3729, 0.8230 }, label = { 0.3450, 0.8380 } },
+            EasternKingdoms = { box = { 0.6717, 0.2595, 0.9123, 0.7645 }, label = { 0.7880, 0.5950 } },
+            DragonIsles     = { box = { 0.5932, 0.1110, 0.7108, 0.2790 }, label = { 0.6520, 0.1950 } },
+            Zandalar        = { box = { 0.3911, 0.6280, 0.4529, 0.7360 }, label = { 0.4220, 0.6820 } },
+            Pandaria        = { box = { 0.4554, 0.7625, 0.5746, 0.9075 }, label = { 0.5150, 0.8380 } },
+        },
+    },
+    blizz = {
+        nameEN  = "Blizzard Layout (True Sturmbart Proportions)",
+        nameRU  = "Раскладка Blizzard (Пропорции Штурмбарта)",
+        shortEN = "Blizzard",
+        shortRU = "Близзард",
+        continents = {
+            Kalimdor        = { box = { 0.1294, 0.2905, 0.3606, 0.7455 }, label = { 0.2580, 0.5180 } },
+            Northrend       = { box = { 0.4063, 0.0930, 0.5637, 0.2710 }, label = { 0.4850, 0.1750 } },
+            BrokenIsles     = { box = { 0.5515, 0.3660, 0.6185, 0.4780 }, label = { 0.5850, 0.4180 } },
+            Maelstrom       = { box = { 0.4323, 0.4225, 0.5377, 0.5775 }, label = { 0.4850, 0.5550 } },
+            KulTiras        = { box = { 0.6227, 0.4695, 0.6933, 0.5745 }, label = { 0.6580, 0.5180 } },
+            KhazAlgar       = { box = { 0.3171, 0.7670, 0.3729, 0.8230 }, label = { 0.3450, 0.8380 } },
+            EasternKingdoms = { box = { 0.6777, 0.2595, 0.9183, 0.7645 }, label = { 0.7950, 0.5950 } },
+            DragonIsles     = { box = { 0.5932, 0.1110, 0.7108, 0.2790 }, label = { 0.6520, 0.1950 } },
+            Zandalar        = { box = { 0.4941, 0.6240, 0.5559, 0.7320 }, label = { 0.5250, 0.6780 } },
+            Pandaria        = { box = { 0.4454, 0.7625, 0.5646, 0.9075 }, label = { 0.5050, 0.8380 } },
+        },
+    },
+}
+
+-- ============================================================================
+-- Realigned Azeroth Continent Metadata & Label Atlas Cells (UiMapID = 947)
 -- ============================================================================
 MAWM.CONTINENTS = {
     {
         key = "KhazAlgar",
         uiMapID = 2274,
+        atlasCell = 4,
         fallbackNameEN = "Khaz Algar (Isle of Dorn)",
         fallbackNameRU = "Каз Алгар (Остров Дорн)",
         hlTex = "hl_KhazAlgar",
         origBox = { 0.2448, 0.7520, 0.3490, 0.8562 },
-        box = { 0.6266, 0.2293, 0.7036, 0.3066 },
-        hit = { 0.6200, 0.2200, 0.7100, 0.3450 },
-        loreSubEN = "Surface: Tiny Isle of Dorn (~Teldrassil scale) • North of Kul Tiras & Lordaeron",
-        loreSubRU = "Поверхность: крошечный Остров Дорн (~размером с Тельдрассил) • К северу от Кул-Тираса и Лордерона",
-        loreDescEN = "On the surface world map, Khaz Algar is ONLY the tiny Isle of Dorn. Over 75% of Khaz Algar's landmass (The Ringing Deeps, Hallowfall, Azj-Kahet) is subterranean! Placed in the northern sea between Northrend, Kul Tiras, and northern Lordaeron.",
-        loreDescRU = "На поверхности мира Каз Алгар — это ТОЛЬКО крошечный Остров Дорн. Более 75% его объёма (Гулкие Глубины, Тайносводье, Аз-Кахет) находятся под землёй! Размещён в северном море между Нордсколом, Кул-Тирасом и северным Лордероном.",
+        box = { 0.6241, 0.2300, 0.6799, 0.2860 },
     },
     {
         key = "BrokenIsles",
         uiMapID = 619,
+        atlasCell = 2,
         fallbackNameEN = "Broken Isles",
         fallbackNameRU = "Расколотые острова",
         hlTex = "hl_BrokenIsles",
         origBox = { 0.5169, 0.3008, 0.6510, 0.5254 },
-        box = { 0.3888, 0.2410, 0.5016, 0.4297 },
-        hit = { 0.3880, 0.2400, 0.5020, 0.4250 },
-        loreSubEN = "Southwest of Northrend & Northwest of the Maelstrom",
-        loreSubRU = "К юго-западу от Нордскола и к северо-западу от Водоворота",
-        loreDescEN = "Nestled directly below western Northrend and northwest of the Maelstrom: Highmountain's snowy peaks face Borean Tundra, Azsuna faces Azshara across the western bay, and Suramar / Broken Shore look straight into the Maelstrom.",
-        loreDescRU = "Расположены прямо под западным Нордсколом к северо-западу от Водоворота: заснеженное Крутогорье смотрит на Борейскую тундру, Азсуна обращена к заливу Азшары, а Сурамар и Расколотый берег смотрят прямо в Водоворот.",
+        box = { 0.3985, 0.2890, 0.4655, 0.4010 },
     },
     {
         key = "KulTiras",
         uiMapID = 876,
+        atlasCell = 3,
         fallbackNameEN = "Kul Tiras",
         fallbackNameRU = "Кул-Тирас",
         hlTex = "hl_KulTiras",
         origBox = { 0.6536, 0.3887, 0.7800, 0.5762 },
-        box = { 0.5513, 0.3605, 0.6648, 0.5293 },
-        hit = { 0.5500, 0.3600, 0.6650, 0.5300 },
-        loreSubEN = "Central Sea East of the Maelstrom • WC3 Naval Crossroads",
-        loreSubRU = "Центральное море к востоку от Водоворота • Морской перекрёсток WC3",
-        loreDescEN = "Placed in the central sea east of the Maelstrom, right across the channel from Gilneas and Baradin Bay. Opens a direct, unobstructed southwest naval corridor to Theramore and Durotar without crossing the Maelstrom!",
-        loreDescRU = "Размещён в центральном море к востоку от Водоворота напротив Гилнеаса и бухты Барадин. Открывает прямой морской коридор для флота адмирала Праудмура на юго-запад к Терамору и Дуротару в обход Водоворота!",
+        box = { 0.5827, 0.4155, 0.6533, 0.5205 },
     },
     {
         key = "Maelstrom",
         uiMapID = 948,
+        atlasCell = 9,
         fallbackNameEN = "The Maelstrom",
         fallbackNameRU = "Водоворот",
         hlTex = "hl_Maelstrom",
         origBox = { 0.3932, 0.3750, 0.5260, 0.5703 },
-        box = { 0.4417, 0.4141, 0.5586, 0.5859 },
-        hit = { 0.4500, 0.4250, 0.5480, 0.5750 },
-        loreSubEN = "Shattered Heart of the Well of Eternity",
-        loreSubRU = "Расколотое сердце Источника Вечности",
-        loreDescEN = "The great rift at the exact center (50%, 50%) of the Great Sea where the original Well of Eternity imploded during the Great Sundering.",
-        loreDescRU = "Великий разлом ровно в геометрическом центре (50%, 50%) Великого моря на месте взрыва Источника Вечности во время Великого Раскола.",
+        box = { 0.4473, 0.4225, 0.5527, 0.5775 },
     },
     {
         key = "Zandalar",
         uiMapID = 875,
+        atlasCell = 7,
         fallbackNameEN = "Zandalar",
         fallbackNameRU = "Зандалар",
         hlTex = "hl_Zandalar",
         origBox = { 0.4896, 0.5332, 0.6016, 0.7285 },
-        box = { 0.3688, 0.6020, 0.4672, 0.7738 },
-        hit = { 0.3680, 0.6020, 0.4680, 0.7740 },
-        loreSubEN = "Southeast of Southern Kalimdor ('South America' Tectonic Plate)",
-        loreSubRU = "К юго-востоку от Южного Калимдора («Южная Америка» Азерота)",
-        loreDescEN = "Positioned southeast of Tanaris and Un'Goro like South America relative to North America, forming a natural tropical Caribbean basin for Kezan and the Goblin islands between Kalimdor and Zandalar!",
-        loreDescRU = "Расположен к юго-востоку от Танариса и Ун'Горо подобно Южной Америке относительно Северной, образуя естественный тропический Карибский бассейн для Кезана и островов гоблинов между Калимдором и Зандаларом!",
+        box = { 0.3841, 0.6280, 0.4459, 0.7360 },
     },
     {
         key = "DragonIsles",
         uiMapID = 1978,
+        atlasCell = 6,
         fallbackNameEN = "Dragon Isles",
         fallbackNameRU = "Драконьи острова",
         hlTex = "hl_DragonIsles",
         origBox = { 0.6797, 0.0898, 0.8424, 0.3223 },
-        box = { 0.7797, 0.5172, 0.9164, 0.7125 },
-        hit = { 0.7800, 0.5170, 0.9160, 0.7120 },
-        loreSubEN = "Southern Hemisphere Climate Gradient • Amirdrassil Near Duskwood",
-        loreSubRU = "Климат Южного полушария (Лазурный Простор на юге) • Амирдрассил у Сумеречного леса",
-        loreDescEN = "On Dragon Isles, the volcanic Waking Shores are in the NORTH (closer to the Equator & Blackrock Mountain), while the snowy tundra of the Azure Span is in the SOUTH (facing the Southern Pole)! Furthermore, Amirdrassil on the west coast aligns near Duskwood's Emerald Dream portal.",
-        loreDescRU = "На Драконьих островах вулканические Берега Пробуждения находятся на СЕВЕРЕ (ближе к экватору и Чёрной горе), а снежная тундра Лазурного Простора — на ЮГЕ (к Южному полюсу)! А Амирдрассил на западе оказывается рядом с порталом Изумрудного Сна в Сумеречном лесу.",
+        box = { 0.8092, 0.5640, 0.9268, 0.7320 },
     },
     {
         key = "Northrend",
         uiMapID = 113,
+        atlasCell = 1,
         fallbackNameEN = "Northrend",
         fallbackNameRU = "Нордскол",
         hlTex = "hl_Northrend",
         origBox = { 0.3776, 0.0215, 0.6042, 0.2773 },
-        box = { 0.3831, 0.0496, 0.5870, 0.2801 },
-        hit = { 0.3830, 0.0500, 0.5870, 0.2800 },
-        loreSubEN = "The Roof of the World • Polar Crown of Azeroth",
-        loreSubRU = "Крыша мира • Полярная корона Азерота",
-        loreDescEN = "Anchors the far north: Borean Tundra faces Highmountain to the south, while Howling Fjord and Storm Peaks look out toward Khaz Algar and the Isle of Dorn.",
-        loreDescRU = "Венчает крайний север: Борейская тундра на юге обращена к Крутогорью, а Ревущий фьорд и Грозовая Гряда смотрят в сторону Каз Алгара и Острова Дорн.",
+        box = { 0.4163, 0.0860, 0.5737, 0.2640 },
     },
     {
         key = "Pandaria",
         uiMapID = 424,
+        atlasCell = 8,
         fallbackNameEN = "Pandaria",
         fallbackNameRU = "Пандария",
         hlTex = "hl_Pandaria",
         origBox = { 0.3854, 0.6797, 0.5977, 0.9375 },
-        box = { 0.4508, 0.7109, 0.6333, 0.9328 },
-        hit = { 0.4510, 0.7110, 0.6330, 0.9330 },
-        loreSubEN = "Deep Southern Hemisphere • Warmed by the Vale of Eternal Blossoms",
-        loreSubRU = "Южное полушарие • Обогреваемая Вечноцветущим долом «Антарктида»",
-        loreDescEN = "Anchored deep in the southern ocean with snowy Kun-Lai Summit in the north; kept lush and unfrozen despite its southern polar latitude by the Titan engine and Well of Eternity waters of the Vale of Eternal Blossoms!",
-        loreDescRU = "Расположена глубоко в южном океане: от оледенения на южной широте её спасает титанический «обогреватель» Вечноцветущего дола (источник вод Вечности в сердце материка)!",
+        box = { 0.4554, 0.7625, 0.5746, 0.9075 },
     },
     {
         key = "Kalimdor",
         uiMapID = 12,
+        atlasCell = 0,
         fallbackNameEN = "Kalimdor",
         fallbackNameRU = "Калимдор",
         hlTex = "hl_Kalimdor",
         origBox = { 0.0469, 0.2930, 0.2969, 0.7852 },
-        box = { 0.1656, 0.2934, 0.3906, 0.7363 },
-        hit = { 0.1660, 0.2930, 0.3900, 0.7360 },
-        loreSubEN = "Shifted inward to restore the wide Veiled Sea in the West",
-        loreSubRU = "Сдвинут внутрь карты, открывая просторы Сокрытого моря на западе",
-        loreDescEN = "Moved inward from the left edge of the frame so the Veiled Sea has true planetary Pacific-scale width. Theramore opens across the central sea toward Kul Tiras, while Tanaris leads southeast to Zandalar.",
-        loreDescRU = "Смещён от левой рамки карты, возвращая Сокрытому морю планетарный масштаб Тихого океана. Терамор открыт морскому пути из Кул-Тираса, а Танарис на юго-востоке переходит в тропический бассейн Зандалара.",
+        box = { 0.1394, 0.2905, 0.3706, 0.7455 },
     },
     {
         key = "EasternKingdoms",
         uiMapID = 13,
+        atlasCell = 5,
         fallbackNameEN = "Eastern Kingdoms",
         fallbackNameRU = "Восточные королевства",
         hlTex = "hl_EasternKingdoms",
         origBox = { 0.7708, 0.2695, 0.9995, 0.7500 },
-        box = { 0.6276, 0.2938, 0.8289, 0.7164 },
-        hit = { 0.6300, 0.2940, 0.8290, 0.7160 },
-        loreSubEN = "Shifted inward across from Kul Tiras & NW of Dragon Isles",
-        loreSubRU = "Сдвинуты ближе к Кул-Тирасу, открывая Зловещее море и Драконьи острова",
-        loreDescEN = "Positioned across the naval channel from Kul Tiras with Khaz Algar to its north-northwest and the Dragon Isles nestled off its southeastern coast.",
-        loreDescRU = "Расположены через пролив от Кул-Тираса, с Каз Алгаром на северо-западе и Драконьими островами у юго-восточных берегов.",
+        box = { 0.6477, 0.2255, 0.8883, 0.7305 },
     },
+}
+
+-- Sea Labels in the Label Atlas (cells 10 & 11)
+MAWM.SEA_LABELS = {
+    { atlasCell = 10, x = 0.0950, y = 0.4300 }, -- The Veiled Sea
+    { atlasCell = 11, x = 0.9150, y = 0.4050 }, -- The Forbidding Sea
 }
 
 -- ============================================================================
@@ -166,10 +193,10 @@ MAWM.LORE_BADGES = {
     {
         id = "1",
         x = 0.145, y = 0.515, r = 0.024,
-        titleEN = "#1. True Planetary Ocean Margins (The Veiled Sea)",
-        titleRU = "№1. Планетарный масштаб океанов (Сокрытое море)",
-        descEN  = "Blizzard's stock map crams Kalimdor and the Eastern Kingdoms flat against the left and right borders like a cropped minimap. Shifting them inward restores the vast planetary expanse of the Veiled Sea and Forbidding Sea.",
-        descRU  = "Стандартная карта Blizzard прижимает Калимдор и Восточные королевства вплотную к рамкам экрана. Сдвиг материков внутрь возвращает планете истинный океанический простор Сокрытого и Зловещего морей.",
+        titleEN = "#1. True Planetary Ocean Margins & Continent Proportions",
+        titleRU = "№1. Истинные пропорции материков и океанов (Сокрытое море)",
+        descEN  = "Continents are scaled to their true lore proportions (inspired by Sturmbart's cartography): Kalimdor and the Eastern Kingdoms are massive primary supercontinents, while island kingdoms and archipelagos sit at authentic planetary scale.",
+        descRU  = "Материки приведены к их истинным лорным пропорциям (по геодезии Штурмбарта): Калимдор и Восточные королевства — гигантские главные суперконтиненты, а архипелаги и островные королевства имеют естественный масштаб.",
     },
     {
         id = "2",
@@ -192,16 +219,16 @@ MAWM.LORE_BADGES = {
         x = 0.665, y = 0.205, r = 0.024,
         titleEN = "#4. Khaz Algar: Tiny Surface Isle of Dorn (~Teldrassil Size)",
         titleRU = "№4. Каз Алгар: крошечный Остров Дорн (~размером с Тельдрассил)",
-        descEN  = "On the surface world map, Khaz Algar is ONLY the Isle of Dorn. The rest of Khaz Algar is a massive vertical underground network! Placed north of Kul Tiras and northwest of Quel'Thalas.",
-        descRU  = "На поверхности мира Каз Алгар — это ТОЛЬКО Остров Дорн. Остальной Каз Алгар уходит глубоко под землю! Размещён к северу от Кул-Тираса и северо-западу от Кель'Таласа.",
+        descEN  = "On the surface world map, Khaz Algar is ONLY the Isle of Dorn. The rest of Khaz Algar is a massive vertical underground network! Placed north of Kul Tiras and northwest of Quel'Thalas in MAWM mode (or SW in Hybrid/Blizzard mode).",
+        descRU  = "На поверхности мира Каз Алгар — это ТОЛЬКО Остров Дорн. Остальной Каз Алгар уходит глубоко под землю! Размещён к северу от Кул-Тираса в режиме MAWM (или на юго-западе в режимах Гибрид/Blizzard).",
     },
     {
         id = "5",
         x = 0.770, y = 0.435, r = 0.024,
-        titleEN = "#5. Eastern Kingdoms: Shifted Inward Toward Kul Tiras",
-        titleRU = "№5. Восточные королевства: сближение с Кул-Тирасом",
-        descEN  = "Shifted inward so Gilneas and Wetlands sit naturally across the strait from Kul Tiras, while opening the vast Forbidding Sea on the east.",
-        descRU  = "Сдвинуты внутрь карты так, что Гилнеас и Болотина естественно смотрят через пролив на Кул-Тирас, а на востоке открывается простор Зловещего моря.",
+        titleEN = "#5. Eastern Kingdoms: Full Supercontinent Scale",
+        titleRU = "№5. Восточные королевства: масштаб суперконтинента",
+        descEN  = "Restored to full supercontinent scale from Quel'Thalas in the north to Cape of Stranglethorn in the south, across the naval channel from Kul Tiras.",
+        descRU  = "Восстановлены в масштабе огромного суперконтинента от Кель'Таласа на севере до Мыса Тернистой долины на юге, через пролив от Кул-Тираса.",
     },
     {
         id = "6",
