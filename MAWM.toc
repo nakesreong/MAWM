@@ -1,11 +1,12 @@
-## Interface: 120001, 120000, 110207, 110105
+## Interface: 120107, 120105, 120001, 110207
 ## Title: |cffffd100MAWM|r — Most Accurate World Map
-## Notes: Lore-accurate, tectonically realigned Azeroth World Map (4K Blizzard CASC & Cartographer styles + Daelin's Fleet Route)
-## Notes-ruRU: Лорно-точная геодезическая карта Азерота (4K стиль Blizzard CASC и Пергамент Картографа + маршрут флота Праудмура)
-## Author: 5cr3am1ng5oul
+## Notes: Lore-accurate, tectonically realigned 4K Azeroth World Map (3 layout modes, 4K Blizzard CASC & Cartographer styles, soft inner hover glow, and 11 client locales)
+## Notes-ruRU: Лорно-точная геодезическая 4K карта Азерота (3 режима раскладки, стили 4K Blizzard и Пергамент Картографа, внутреннее свечение и 11 локалей)
+## Author: Gemini (Tiger) | QA & Vision: Anya (Nyarlatocat / 5cr3am1ng5oul)
 ## Version: 1.4.0
 ## IconTexture: Interface\AddOns\MAWM\Textures\Logo
 ## SavedVariables: MAWM_DB
+## X-Curse-Project-ID: 1764505
 
 Data.lua
 Core.lua

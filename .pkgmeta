@@ -1,0 +1,19 @@
+package-as: MAWM
+enable-nolib-creation: no
+
+ignore:
+  - .github
+  - .gitignore
+  - .ref_addons
+  - CURSEFORGE_DESCRIPTION.md
+  - ROADMAP_PINS_AND_4K_REMASTER.md
+  - Logo.png
+  - EN_Screenshot_1_FullMap_Pin1.jpg
+  - EN_Screenshot_2_KulTiras_Pin3.png
+  - EN_Screenshot_3_DragonIsles_Pin6.png
+  - EN_Screenshot_4_KhazAlgar_Pin4.png
+  - MAWM_v1.4.0_CurseForge.zip
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
