@@ -1,5 +1,21 @@
 # Changelog — MAWM (Most Accurate World Map)
 
+## [1.5.0] - 2026-10-27
+### Added
+- **MAWM Control Center Settings Window (`/mawm`, Minimap Button, World Map `[Settings]` Button, and `ESC -> Options -> AddOns -> MAWM`):**
+  - Modular dark ElvUI/SpArc-style Control Center with 3 dedicated tabs:
+    1. **Map & Layout:** Master toggles, 3 geodesy layout selectors (*MAWM Full Geodesy*, *Hybrid*, *Blizzard Positions*), 2 ocean backdrop themes (*4K Coastal Sea Chart*, *Cartographer's Parchment*), and 1-click language switcher across all 11 official WoW locales.
+    2. **Continent Scales:** 10 live scale multiplier sliders (`0.60x – 2.40x`) for every continent and island kingdom with real-time map preview and one-click reset.
+    3. **Ships & Zeppelins:** Toggleable intercontinental transit routes with faction filters (*Alliance Blue*, *Horde Red*, *Neutral Black*) and line opacity control.
+- **Layout-Adaptive Intercontinental Ship & Zeppelin Transit Routes (`MAWM.TRANSIT_ROUTES`):**
+  - Renders curved dashed maritime and zeppelin routes with diamond harbor nodes across the Azeroth World Map (`UiMapID = 947`).
+  - Harbor anchors (`MAWM.PORTS`) are bound to each continent's normalized coastline coordinates, so all routes automatically recalculate when switching between *MAWM*, *Hybrid*, and *Blizzard* layouts or resizing continents.
+  - Hovering any route or harbor node highlights the path and displays a bilingual (*EN/RU*) tooltip with vessel type, faction, **where to board (Point A)**, and **destination (Point B)**.
+
+### Fixed
+- **Centered Maelstrom Typography (All 11 Locales):** Adjusted the horizontal label offset (`dx = +0.048` relative to the asymmetrical *Maelstrom + Kezan + Lost Isles* sprite bounds) so *THE MAELSTROM / ВОДОВОРОТ* sits dead-center beneath the whirlpool eye (`x = 0.5023`).
+- **Coastline-Relative Dynamic Label Scaling:** Refactored continent bounding-box and label placement (`MAWM:ComputeContinentBoxAndLabel`) so continent titles automatically track coastline edges when scaling continents up or down.
+
 ## [1.4.0] - 2026-10-26
 ### Added
 - **3 Selectable Geodesy Layout Modes (`Right-Click` / `Ctrl-Click` or `/mawm layout`):**

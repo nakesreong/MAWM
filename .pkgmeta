@@ -6,8 +6,12 @@ ignore:
   - .gitignore
   - .ref_addons
   - CURSEFORGE_DESCRIPTION.md
+  - DEVELOPMENT_GUIDE.md
   - ROADMAP_PINS_AND_4K_REMASTER.md
+  - Options.lua
   - Logo.png
+  - CurseForge_1_MAWM_Layout_EN.jpg
+  - CurseForge_2_Blizzard_Layout_EN.jpg
   - EN_Screenshot_1_FullMap_Pin1.jpg
   - EN_Screenshot_2_KulTiras_Pin3.png
   - EN_Screenshot_3_DragonIsles_Pin6.png

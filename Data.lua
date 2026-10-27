@@ -1,6 +1,6 @@
 local ADDON_NAME, MAWM = ...
 
-MAWM.VERSION = "1.4.0"
+MAWM.VERSION = "1.5.0"
 MAWM.AZEROTH_MAP_ID = 947
 
 local isRU = (GetLocale() == "ruRU")
