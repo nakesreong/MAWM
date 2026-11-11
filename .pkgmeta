@@ -17,7 +17,3 @@ ignore:
   - EN_Screenshot_3_DragonIsles_Pin6.png
   - EN_Screenshot_4_KhazAlgar_Pin4.png
   - MAWM_v1.4.0_CurseForge.zip
-
-manual-changelog:
-  filename: CHANGELOG.md
-  markup-type: markdown
