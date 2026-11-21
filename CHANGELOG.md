@@ -1,5 +1,21 @@
 # Changelog — MAWM (Most Accurate World Map)
 
+## [1.5.1] - 2026-11-21
+### Added
+- **Interactive Harbor Nodes & 1-Click Port Map Zoom:**
+  - Hovering any harbor diamond node (*Stormwind Harbor*, *Boralus*, *Orgrimmar Zeppelin Towers*, *Echo Isles*, *Dazar'alor*, *Valiance Keep*, *Warsong Hold*, *Waking Shores*, *Brill*, *Grom'gol*, *Ratchet*, *Booty Bay*) now highlights all active ship/zeppelin routes departing from that harbor and lists every destination & pier in one unified tooltip.
+  - **Left-Clicking** any harbor node (or transit route line) opens the exact harbor/city zone map (`Stormwind City`, `Boralus`, `Orgrimmar`, `Dazar'alor`, `The Waking Shores`, etc.) in a single click.
+- **Close Control Center with `Escape`:** Registered `MAWMControlCenter` in `UISpecialFrames` for seamless keyboard/ActionCam navigation.
+
+### Fixed
+- **WoW 12.x (`Midnight`) Secret-Value & Taint Elimination (`LayoutFrame.lua` / `AreaPOIDataProvider`):**
+  - Replaced all direct `WorldMapFrame:SetMapID()` calls with native untainted `C_Map.OpenWorldMap` transitions and native `ScrollContainer` mouse-wheel propagation.
+  - Removed `SetStockHighlightSuppressed` pin alpha/field mutations on `WorldMapFrame` pooled pins.
+  - Replaced all global `GameTooltip` usage with an isolated private `MAWM_CustomTooltip` frame so Blizzard `AreaPOI` widget sets never inherit addon execution taint.
+
+### Changed
+- **Modular Architecture Split:** Extracted the Control Center UI, Minimap Button, and Blizzard AddOn Settings category out of `Core.lua` into a dedicated `Options.lua` module (`Data.lua` + `Core.lua` + `Options.lua`).
+
 ## [1.5.0] - 2026-10-27
 ### Added
 - **MAWM Control Center Settings Window (`/mawm`, Minimap Button, World Map `[Settings]` Button, and `ESC -> Options -> AddOns -> MAWM`):**
