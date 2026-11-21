@@ -246,42 +246,267 @@ local function GetHoveredContinent(nx, ny)
 end
 
 -- ============================================================================
--- Suppress / Restore All Stock Blizzard & Addon Pins on 947
+-- Midnight 12.x Secret-Value & Taint Guards + Isolated MAWM Custom Tooltip
+--   1. Never touch _G.GameTooltip (prevents LayoutFrame / UIWidgetManager taint
+--      when hovering Blizzard AreaPOI pins with widget sets).
+--   2. Never call WorldMapFrame:SetMapID() directly (use native C_Map.OpenWorldMap).
+--   3. Never mutate or write fields onto Blizzard MapCanvas pins.
 -- ============================================================================
-local function SetStockHighlightSuppressed(suppress)
-    if not WorldMapFrame then
+local function SafeNotSecret(val)
+    if _G.issecretvalue and _G.issecretvalue(val) then
+        return false
+    end
+    return true
+end
+MAWM.SafeNotSecret = SafeNotSecret
+
+local function SafeOpenWorldMap(mapID)
+    if not mapID or not SafeNotSecret(mapID) then
         return
     end
-    if WorldMapFrame.EnumeratePinsByTemplate then
-        for pin in WorldMapFrame:EnumeratePinsByTemplate("MapHighlightPinTemplate") do
-            pin:SetAlpha(suppress and 0 or 1)
-            if pin.HighlightTexture then
-                pin.HighlightTexture:SetAlpha(suppress and 0 or 1)
-            end
+    if _G.InCombatLockdown and _G.InCombatLockdown() then
+        return
+    end
+    if _G.C_Map and _G.C_Map.OpenWorldMap then
+        pcall(_G.C_Map.OpenWorldMap, mapID)
+    elseif _G.OpenWorldMap then
+        pcall(_G.OpenWorldMap, mapID)
+    end
+end
+MAWM.SafeOpenWorldMap = SafeOpenWorldMap
+
+local MAWMTooltip = nil
+
+local function EnsureMAWMTooltip()
+    if MAWMTooltip then
+        return MAWMTooltip
+    end
+
+    local tip = CreateFrame("Frame", "MAWM_CustomTooltip", UIParent, "BackdropTemplate")
+    tip:SetFrameStrata("TOOLTIP")
+    tip:SetFrameLevel(9500)
+    tip:SetClampedToScreen(true)
+    tip:EnableMouse(false)
+    tip:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 12,
+        insets   = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    tip:SetBackdropColor(0.05, 0.05, 0.07, 0.96)
+    tip:SetBackdropBorderColor(0.85, 0.68, 0.28, 0.95)
+    tip:Hide()
+
+    local rawShow = tip.Show
+    local rawHide = tip.Hide
+    tip.lines = {}
+    tip.numLines = 0
+
+    local function AcquireRow(idx)
+        local row = tip.lines[idx]
+        if not row then
+            local fontPath = STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
+            local left = tip:CreateFontString(nil, "OVERLAY", idx == 1 and "GameFontNormal" or "GameFontNormalSmall")
+            left:SetFont(fontPath, idx == 1 and 13 or 12, "")
+            left:SetJustifyH("LEFT")
+            left:SetJustifyV("TOP")
+
+            local right = tip:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            right:SetFont(fontPath, 12, "")
+            right:SetJustifyH("RIGHT")
+            right:SetJustifyV("TOP")
+            right:Hide()
+
+            row = { left = left, right = right }
+            tip.lines[idx] = row
+        end
+        return row
+    end
+
+    function tip:SetOwner(owner, anchor, dx, dy)
+        self._owner  = owner
+        self._anchor = anchor or "ANCHOR_CURSOR_RIGHT"
+        self._dx     = dx or 0
+        self._dy     = dy or 0
+        self:ClearLines()
+    end
+
+    function tip:GetOwner()
+        return self._owner
+    end
+
+    function tip:ClearLines()
+        self.numLines = 0
+        for i = 1, #self.lines do
+            self.lines[i].left:Hide()
+            self.lines[i].right:Hide()
         end
     end
-    if WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer.Child then
-        local child = WorldMapFrame.ScrollContainer.Child
-        for _, frame in ipairs({ child:GetChildren() }) do
-            if frame ~= MAWM.CanvasFrame then
-                if suppress then
-                    if frame._mawmOrigAlpha == nil then
-                        frame._mawmOrigAlpha = frame:GetAlpha()
-                    end
-                    frame:SetAlpha(0)
-                    if frame._mawmOrigLevel then
-                        frame:SetFrameLevel(frame._mawmOrigLevel)
-                        frame._mawmOrigLevel = nil
+
+    function tip:AddLine(text, r, g, b, wrap)
+        local idx = self.numLines + 1
+        self.numLines = idx
+        local row = AcquireRow(idx)
+        local str = tostring(text or "")
+        row.isDouble = false
+        row.isBlank  = (str == "" or str == " ")
+        row.wrap     = wrap and true or false
+        row.left:SetTextColor(r or 1.0, g or 0.82, b or 0.0, 1.0)
+        row.left:SetText(str)
+        row.right:SetText("")
+        row.right:Hide()
+    end
+
+    function tip:AddDoubleLine(lText, rText, lr, lg, lb, rr, rg, rb)
+        local idx = self.numLines + 1
+        self.numLines = idx
+        local row = AcquireRow(idx)
+        row.isDouble = true
+        row.isBlank  = false
+        row.wrap     = false
+        row.left:SetTextColor(lr or 1.0, lg or 0.82, lb or 0.0, 1.0)
+        row.left:SetText(tostring(lText or ""))
+        row.right:SetTextColor(rr or 1.0, rg or 1.0, rb or 1.0, 1.0)
+        row.right:SetText(tostring(rText or ""))
+    end
+
+    function tip:UpdateAnchorPosition()
+        self:ClearAllPoints()
+        local owner  = self._owner
+        local anchor = self._anchor or "ANCHOR_CURSOR_RIGHT"
+        local dx     = self._dx or 0
+        local dy     = self._dy or 0
+
+        if anchor == "ANCHOR_CURSOR_RIGHT" or not owner then
+            local okP, cx, cy = pcall(GetCursorPosition)
+            local okS, scale  = pcall(self.GetEffectiveScale, self)
+            if okP and okS and SafeNotSecret(cx) and SafeNotSecret(cy) and SafeNotSecret(scale) and type(scale) == "number" and scale > 0 then
+                local ux, uy = (cx / scale) + dx, (cy / scale) + dy
+                local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
+                local tw, th = self:GetWidth(), self:GetHeight()
+                if SafeNotSecret(sw) and SafeNotSecret(tw) and type(sw) == "number" and type(tw) == "number" and (ux + tw > sw - 8) then
+                    ux = (cx / scale) - tw - 12
+                end
+                if SafeNotSecret(sh) and SafeNotSecret(th) and type(sh) == "number" and type(th) == "number" and (uy - th < 8) then
+                    uy = th + 8
+                end
+                self:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", ux, uy)
+            else
+                self:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+            end
+        elseif anchor == "ANCHOR_LEFT" then
+            self:SetPoint("TOPRIGHT", owner, "TOPLEFT", (dx ~= 0 and dx) or -4, dy)
+        elseif anchor == "ANCHOR_BOTTOMRIGHT" then
+            self:SetPoint("TOPRIGHT", owner, "BOTTOMRIGHT", dx, dy)
+        else
+            self:SetPoint("TOPLEFT", owner, "BOTTOMLEFT", dx, dy)
+        end
+    end
+
+    function tip:Show()
+        if self.numLines <= 0 then
+            rawHide(self)
+            return
+        end
+        local padX, padY = 12, 10
+        local lineGap = 3
+        local maxSingleW = 200
+        local hasWrap = false
+
+        for i = 1, self.numLines do
+            local row = self.lines[i]
+            if not row.isBlank then
+                row.left:SetWidth(0)
+                row.left:SetWordWrap(false)
+                local lw = row.left:GetStringWidth()
+                if not SafeNotSecret(lw) or type(lw) ~= "number" then lw = 220 end
+                if row.isDouble then
+                    row.right:SetWidth(0)
+                    row.right:SetWordWrap(false)
+                    local rw = row.right:GetStringWidth()
+                    if not SafeNotSecret(rw) or type(rw) ~= "number" then rw = 100 end
+                    local pairW = lw + 24 + rw
+                    if pairW > maxSingleW then maxSingleW = pairW end
+                elseif row.wrap then
+                    hasWrap = true
+                    if i == 1 and lw > maxSingleW then
+                        maxSingleW = math.min(420, lw)
                     end
                 else
-                    if frame._mawmOrigAlpha ~= nil then
-                        frame:SetAlpha(frame._mawmOrigAlpha)
-                        frame._mawmOrigAlpha = nil
-                    end
+                    if lw > maxSingleW then maxSingleW = lw end
                 end
             end
         end
+
+        if hasWrap and maxSingleW < 340 then
+            maxSingleW = 340
+        end
+        local contentW = math.max(200, math.min(440, math.ceil(maxSingleW + 4)))
+
+        local yOff = -padY
+        for i = 1, self.numLines do
+            local row = self.lines[i]
+            if i > 1 then
+                yOff = yOff - lineGap
+            end
+            row.left:ClearAllPoints()
+            row.right:ClearAllPoints()
+
+            if row.isBlank then
+                row.left:Hide()
+                row.right:Hide()
+                yOff = yOff - 5
+            elseif row.isDouble then
+                row.left:SetPoint("TOPLEFT", self, "TOPLEFT", padX, yOff)
+                row.right:SetPoint("TOPRIGHT", self, "TOPRIGHT", -padX, yOff)
+                row.left:Show()
+                row.right:Show()
+                local lh = row.left:GetStringHeight()
+                local rh = row.right:GetStringHeight()
+                if not SafeNotSecret(lh) or type(lh) ~= "number" then lh = 14 end
+                if not SafeNotSecret(rh) or type(rh) ~= "number" then rh = 14 end
+                yOff = yOff - math.max(14, lh, rh)
+            else
+                row.left:SetPoint("TOPLEFT", self, "TOPLEFT", padX, yOff)
+                if row.wrap then
+                    row.left:SetWidth(contentW)
+                    row.left:SetWordWrap(true)
+                else
+                    row.left:SetWidth(0)
+                    row.left:SetWordWrap(false)
+                end
+                row.left:Show()
+                row.right:Hide()
+                local lh = row.left:GetStringHeight()
+                if not SafeNotSecret(lh) or type(lh) ~= "number" then lh = 14 end
+                yOff = yOff - math.max(14, lh)
+            end
+        end
+
+        local totalH = math.max(28, math.ceil(-yOff + padY))
+        self:SetSize(contentW + padX * 2, totalH)
+        self:UpdateAnchorPosition()
+        rawShow(self)
     end
+
+    function tip:Hide()
+        self._owner = nil
+        rawHide(self)
+    end
+
+    tip:SetScript("OnUpdate", function(self)
+        if self._owner and not self._owner:IsVisible() then
+            self:Hide()
+            return
+        end
+        if self._anchor == "ANCHOR_CURSOR_RIGHT" then
+            self:UpdateAnchorPosition()
+        end
+    end)
+
+    MAWMTooltip = tip
+    MAWM.Tooltip = tip
+    return tip
 end
 
 -- ============================================================================
@@ -324,9 +549,8 @@ function MAWM:EnsureCanvasOverlay()
     local f = CreateFrame("Frame", "MAWM_CanvasOverlayFrame", child)
     f:SetAllPoints(child)
     f:SetFrameStrata(child:GetFrameStrata())
-    f:SetFrameLevel(math.min(9500, child:GetFrameLevel() + 2500))
+    f:SetFrameLevel(math.min(9500, child:GetFrameLevel() + 4500))
     f:EnableMouse(true)
-    f:EnableMouseWheel(true)
 
     -- 1. 3x2 grid of 1024x1024 lossless RLE TGA ocean background tiles (= 3072x2048, exact 3:2 aspect ratio)
     f.tiles = {}
@@ -406,10 +630,10 @@ function MAWM:EnsureCanvasOverlay()
 
     function f:UpdateTransitRoutes(hoveredRouteId)
         local w, h = self:GetWidth(), self:GetHeight()
-        if not w or w <= 0 or not h or h <= 0 then
+        if not SafeNotSecret(w) or not SafeNotSecret(h) or not w or w <= 0 or not h or h <= 0 then
             w, h = child:GetWidth(), child:GetHeight()
         end
-        if not w or w <= 0 then return end
+        if not SafeNotSecret(w) or not SafeNotSecret(h) or not w or w <= 0 or not h or h <= 0 then return end
 
         local dashIdx = 0
         local nodeIdx = 0
@@ -511,10 +735,10 @@ function MAWM:EnsureCanvasOverlay()
     -- Layout update when Child changes size or user switches Layout / Style / Language / Scale
     function f:UpdateTileLayout()
         local w, h = self:GetWidth(), self:GetHeight()
-        if not w or w <= 0 or not h or h <= 0 then
+        if not SafeNotSecret(w) or not SafeNotSecret(h) or not w or w <= 0 or not h or h <= 0 then
             w, h = child:GetWidth(), child:GetHeight()
         end
-        if not w or w <= 0 then return end
+        if not SafeNotSecret(w) or not SafeNotSecret(h) or not w or w <= 0 or not h or h <= 0 then return end
 
         local tileW = w / 3.0
         local tileH = h / 2.0
@@ -616,19 +840,15 @@ function MAWM:EnsureCanvasOverlay()
         self:UpdateTileLayout()
     end)
 
-    -- Forward MouseWheel so zooming in/out on Azeroth works natively
-    f:SetScript("OnMouseWheel", function(_, delta)
-        if WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer.OnMouseWheel then
-            WorldMapFrame.ScrollContainer:OnMouseWheel(delta)
-        end
-    end)
-
-    -- Mouse Click & Pan forwarding
+    -- Mouse Click & Pan forwarding (MouseWheel propagates natively to ScrollContainer!)
     local downX, downY = 0, 0
+    local isPanningZoomed = false
     f:SetScript("OnMouseDown", function(_, button)
         downX, downY = GetCursorPosition()
+        isPanningZoomed = false
         if button == "LeftButton" and WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer.IsZoomedIn then
             if WorldMapFrame.ScrollContainer:IsZoomedIn() and WorldMapFrame.ScrollContainer.OnMouseDown then
+                isPanningZoomed = true
                 WorldMapFrame.ScrollContainer:OnMouseDown(button)
             end
         end
@@ -636,37 +856,40 @@ function MAWM:EnsureCanvasOverlay()
 
     f:SetScript("OnMouseUp", function(self, button)
         local upX, upY = GetCursorPosition()
-        if button == "LeftButton" and WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer.OnMouseUp then
+        if isPanningZoomed and button == "LeftButton" and WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer.OnMouseUp then
             WorldMapFrame.ScrollContainer:OnMouseUp(button)
         end
-        local dx = (upX or 0) - (downX or 0)
-        local dy = (upY or 0) - (downY or 0)
+        isPanningZoomed = false
+
+        local dx = (SafeNotSecret(upX) and upX or 0) - (SafeNotSecret(downX) and downX or 0)
+        local dy = (SafeNotSecret(upY) and upY or 0) - (SafeNotSecret(downY) and downY or 0)
         local moved = math.sqrt(dx * dx + dy * dy)
         if moved > 10 then
             return -- User was panning the zoomed map
         end
 
+        local tip = EnsureMAWMTooltip()
         if button == "RightButton" then
             if PlaySound and SOUNDKIT then
                 PlaySound(SOUNDKIT.IG_QUEST_LOG_CLOSE or 845)
             end
             self.HighlightTex:Hide()
-            GameTooltip:Hide()
-            WorldMapFrame:SetMapID(COSMIC_MAP_ID)
+            tip:Hide()
+            SafeOpenWorldMap(COSMIC_MAP_ID)
             return
         end
 
         if button == "LeftButton" and WorldMapFrame.ScrollContainer then
             local nx, ny = WorldMapFrame.ScrollContainer:GetNormalizedCursorPosition()
-            if nx and ny then
+            if SafeNotSecret(nx) and SafeNotSecret(ny) and nx and ny then
                 local cont = GetHoveredContinent(nx, ny)
                 if cont and cont.uiMapID then
                     if PlaySound and SOUNDKIT then
                         PlaySound(SOUNDKIT.IG_QUEST_LOG_OPEN or 844)
                     end
                     self.HighlightTex:Hide()
-                    GameTooltip:Hide()
-                    WorldMapFrame:SetMapID(cont.uiMapID)
+                    tip:Hide()
+                    SafeOpenWorldMap(cont.uiMapID)
                 end
             end
         end
@@ -683,28 +906,27 @@ function MAWM:EnsureCanvasOverlay()
         end
         elapsedAcc = 0
 
-        if not (WorldMapFrame and WorldMapFrame:IsShown() and WorldMapFrame:GetMapID() == AZEROTH_MAP_ID and MAWM_DB and MAWM_DB.enabled) then
+        local curMapID = WorldMapFrame and WorldMapFrame:GetMapID()
+        if not (WorldMapFrame and WorldMapFrame:IsShown() and SafeNotSecret(curMapID) and curMapID == AZEROTH_MAP_ID and MAWM_DB and MAWM_DB.enabled) then
             self.HighlightTex:Hide()
             return
         end
 
-        -- Keep stock misplaced Blizzard highlight suppressed on 947
-        SetStockHighlightSuppressed(true)
-
+        local tip = EnsureMAWMTooltip()
         if not self:IsMouseOver() or not WorldMapFrame.ScrollContainer then
             self.HighlightTex:Hide()
             if self._hoveredRouteId then
                 self._hoveredRouteId = nil
                 self:UpdateTransitRoutes(nil)
             end
-            if GameTooltip:GetOwner() == self then
-                GameTooltip:Hide()
+            if tip:GetOwner() == self then
+                tip:Hide()
             end
             return
         end
 
         local nx, ny = WorldMapFrame.ScrollContainer:GetNormalizedCursorPosition()
-        if not nx or not ny then
+        if not SafeNotSecret(nx) or not SafeNotSecret(ny) or not nx or not ny then
             self.HighlightTex:Hide()
             return
         end
@@ -717,11 +939,11 @@ function MAWM:EnsureCanvasOverlay()
                 self._hoveredRouteId = nil
                 self:UpdateTransitRoutes(nil)
             end
-            GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT", 16, -12)
-            GameTooltip:ClearLines()
-            GameTooltip:AddLine(L(badge.titleEN, badge.titleRU), 1.0, 0.84, 0.25, true)
-            GameTooltip:AddLine(L(badge.descEN, badge.descRU), 0.92, 0.90, 0.82, true)
-            GameTooltip:Show()
+            tip:SetOwner(self, "ANCHOR_CURSOR_RIGHT", 16, -12)
+            tip:ClearLines()
+            tip:AddLine(L(badge.titleEN, badge.titleRU), 1.0, 0.84, 0.25, true)
+            tip:AddLine(L(badge.descEN, badge.descRU), 0.92, 0.90, 0.82, true)
+            tip:Show()
             return
         end
 
@@ -734,16 +956,16 @@ function MAWM:EnsureCanvasOverlay()
             end
             self.HighlightTex:Hide()
             local col = FACTION_COLORS[route.faction] or FACTION_COLORS.NEUTRAL
-            GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT", 16, -12)
-            GameTooltip:ClearLines()
-            GameTooltip:AddLine(col.hex .. L(route.titleEN, route.titleRU) .. "|r")
-            GameTooltip:AddLine(L(route.vesselEN, route.vesselRU), 0.80, 0.82, 0.88, true)
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("|cffffd100" .. L("Where to board (Point A):", "Где сесть (Точка А):") .. "|r")
-            GameTooltip:AddLine("  " .. L(route.boardEN, route.boardRU), 0.95, 0.95, 0.95, true)
-            GameTooltip:AddLine("|cffffd100" .. L("Destination (Point B):", "Прибытие (Точка Б):") .. "|r")
-            GameTooltip:AddLine("  " .. L(route.arriveEN, route.arriveRU), 0.95, 0.95, 0.95, true)
-            GameTooltip:Show()
+            tip:SetOwner(self, "ANCHOR_CURSOR_RIGHT", 16, -12)
+            tip:ClearLines()
+            tip:AddLine(col.hex .. L(route.titleEN, route.titleRU) .. "|r")
+            tip:AddLine(L(route.vesselEN, route.vesselRU), 0.80, 0.82, 0.88, true)
+            tip:AddLine(" ")
+            tip:AddLine("|cffffd100" .. L("Where to board (Point A):", "Где сесть (Точка А):") .. "|r")
+            tip:AddLine("  " .. L(route.boardEN, route.boardRU), 0.95, 0.95, 0.95, true)
+            tip:AddLine("|cffffd100" .. L("Destination (Point B):", "Прибытие (Точка Б):") .. "|r")
+            tip:AddLine("  " .. L(route.arriveEN, route.arriveRU), 0.95, 0.95, 0.95, true)
+            tip:Show()
             return
         elseif self._hoveredRouteId then
             self._hoveredRouteId = nil
@@ -754,7 +976,7 @@ function MAWM:EnsureCanvasOverlay()
         local cont, b = GetHoveredContinent(nx, ny)
         if cont and b then
             local w, h = self:GetWidth(), self:GetHeight()
-            if w and w > 0 and h and h > 0 and cont.hlTex then
+            if SafeNotSecret(w) and SafeNotSecret(h) and w and w > 0 and h and h > 0 and cont.hlTex then
                 self.HighlightTex:ClearAllPoints()
                 self.HighlightTex:SetPoint("TOPLEFT", self, "TOPLEFT", b[1] * w, -(b[2] * h))
                 self.HighlightTex:SetSize((b[3] - b[1]) * w, (b[4] - b[2]) * h)
@@ -765,13 +987,13 @@ function MAWM:EnsureCanvasOverlay()
             else
                 self.HighlightTex:Hide()
             end
-            if GameTooltip:GetOwner() == self then
-                GameTooltip:Hide()
+            if tip:GetOwner() == self then
+                tip:Hide()
             end
         else
             self.HighlightTex:Hide()
-            if GameTooltip:GetOwner() == self then
-                GameTooltip:Hide()
+            if tip:GetOwner() == self then
+                tip:Hide()
             end
         end
     end)
@@ -779,9 +1001,8 @@ function MAWM:EnsureCanvasOverlay()
     f:SetScript("OnHide", function(self)
         self.HighlightTex:Hide()
         self._hoveredRouteId = nil
-        SetStockHighlightSuppressed(false)
-        if GameTooltip:GetOwner() == self then
-            GameTooltip:Hide()
+        if MAWMTooltip and MAWMTooltip:GetOwner() == self then
+            MAWMTooltip:Hide()
         end
     end)
 
@@ -832,15 +1053,18 @@ function MAWM:EnsureToggleButton()
     end)
     gearBtn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(0.18, 0.14, 0.08, 0.96)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT", 0, -4)
-        GameTooltip:ClearLines()
-        GameTooltip:AddLine("|cffffd100" .. L("MAWM Control Center", "Панель настроек MAWM") .. "|r")
-        GameTooltip:AddLine(L("Click to open the settings window (layouts, continent scale sliders, ship & zeppelin routes).", "Нажмите, чтобы открыть окно настроек (раскладки, ползунки размеров материков, маршруты кораблей и дирижаблей)."), 0.88, 0.85, 0.76, true)
-        GameTooltip:Show()
+        local tip = EnsureMAWMTooltip()
+        tip:SetOwner(self, "ANCHOR_BOTTOMRIGHT", 0, -4)
+        tip:ClearLines()
+        tip:AddLine("|cffffd100" .. L("MAWM Control Center", "Панель настроек MAWM") .. "|r")
+        tip:AddLine(L("Click to open the settings window (layouts, continent scale sliders, ship & zeppelin routes).", "Нажмите, чтобы открыть окно настроек (раскладки, ползунки размеров материков, маршруты кораблей и дирижаблей)."), 0.88, 0.85, 0.76, true)
+        tip:Show()
     end)
     gearBtn:SetScript("OnLeave", function(self)
         self:SetBackdropColor(0.07, 0.05, 0.03, 0.90)
-        GameTooltip:Hide()
+        if MAWMTooltip and MAWMTooltip:GetOwner() == self then
+            MAWMTooltip:Hide()
+        end
     end)
     self.GearButton = gearBtn
 
@@ -928,9 +1152,10 @@ function MAWM:EnsureToggleButton()
                 MAWM_DB.enabled = true
             end
         else
-            if WorldMapFrame:GetMapID() ~= AZEROTH_MAP_ID then
-                WorldMapFrame:SetMapID(AZEROTH_MAP_ID)
+            local curMapID = WorldMapFrame:GetMapID()
+            if not SafeNotSecret(curMapID) or curMapID ~= AZEROTH_MAP_ID then
                 MAWM_DB.enabled = true
+                SafeOpenWorldMap(AZEROTH_MAP_ID)
             else
                 MAWM_DB.enabled = not MAWM_DB.enabled
             end
@@ -942,21 +1167,22 @@ function MAWM:EnsureToggleButton()
         if MAWM.RefreshConfigUI then
             MAWM:RefreshConfigUI()
         end
-        if GameTooltip:GetOwner() == self then
+        if MAWMTooltip and MAWMTooltip:GetOwner() == self then
             self:GetScript("OnEnter")(self)
         end
     end)
 
     btn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(0.16, 0.12, 0.07, 0.96)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT", 0, -4)
-        GameTooltip:ClearLines()
-        GameTooltip:AddLine("|cffffd100MAWM — Most Accurate World Map|r v" .. MAWM.VERSION)
-        GameTooltip:AddLine(L(
+        local tip = EnsureMAWMTooltip()
+        tip:SetOwner(self, "ANCHOR_BOTTOMRIGHT", 0, -4)
+        tip:ClearLines()
+        tip:AddLine("|cffffd100MAWM — Most Accurate World Map|r v" .. MAWM.VERSION)
+        tip:AddLine(L(
             "Lore-accurate continent proportions, 3 geodesy layouts & live ship/zeppelin routes",
             "Истинные пропорции материков, 3 режима раскладки и маршруты кораблей/дирижаблей"
         ), 0.85, 0.82, 0.72, true)
-        GameTooltip:AddLine(" ")
+        tip:AddLine(" ")
 
         local statusStr = MAWM_DB.enabled
             and L("|cff55ff55ENABLED|r", "|cff55ff55ВКЛЮЧЕНА|r")
@@ -974,27 +1200,30 @@ function MAWM:EnsureToggleButton()
             and L("|cff55ff55ON (Ships & Zeppelins)|r", "|cff55ff55ВКЛ (Корабли и дирижабли)|r")
             or  L("|cff888888OFF|r", "|cff888888ВЫКЛ|r")
 
-        GameTooltip:AddDoubleLine(L("Status:", "Статус:"), statusStr, 1, 0.82, 0, 1, 1, 1)
-        GameTooltip:AddDoubleLine(L("Layout Mode:", "Режим раскладки:"), layoutStr, 1, 0.82, 0, 1, 1, 1)
-        GameTooltip:AddDoubleLine(L("Map Style:", "Стиль карты:"), styleStr, 1, 0.82, 0, 0.9, 0.9, 0.9)
-        GameTooltip:AddDoubleLine(L("Map Language:", "Язык подписей:"), langStr, 1, 0.82, 0, 1, 1, 1)
-        GameTooltip:AddDoubleLine(L("Transit Routes:", "Маршруты транспорта:"), routeStr, 1, 0.82, 0, 1, 1, 1)
-        GameTooltip:AddLine(" ")
-        if WorldMapFrame:GetMapID() == AZEROTH_MAP_ID then
-            GameTooltip:AddLine(L("|cff55ff55Left-Click:|r Toggle Realigned vs Stock Map", "|cff55ff55ЛКМ:|r Переключить исправленную / стандартную карту"), 0.9, 0.9, 0.9)
+        tip:AddDoubleLine(L("Status:", "Статус:"), statusStr, 1, 0.82, 0, 1, 1, 1)
+        tip:AddDoubleLine(L("Layout Mode:", "Режим раскладки:"), layoutStr, 1, 0.82, 0, 1, 1, 1)
+        tip:AddDoubleLine(L("Map Style:", "Стиль карты:"), styleStr, 1, 0.82, 0, 0.9, 0.9, 0.9)
+        tip:AddDoubleLine(L("Map Language:", "Язык подписей:"), langStr, 1, 0.82, 0, 1, 1, 1)
+        tip:AddDoubleLine(L("Transit Routes:", "Маршруты транспорта:"), routeStr, 1, 0.82, 0, 1, 1, 1)
+        tip:AddLine(" ")
+        local curMapID = WorldMapFrame:GetMapID()
+        if SafeNotSecret(curMapID) and curMapID == AZEROTH_MAP_ID then
+            tip:AddLine(L("|cff55ff55Left-Click:|r Toggle Realigned vs Stock Map", "|cff55ff55ЛКМ:|r Переключить исправленную / стандартную карту"), 0.9, 0.9, 0.9)
         else
-            GameTooltip:AddLine(L("|cff55ff55Left-Click:|r Jump to Azeroth World Map", "|cff55ff55ЛКМ:|r Открыть глобальную карту Азерота"), 0.9, 0.9, 0.9)
+            tip:AddLine(L("|cff55ff55Left-Click:|r Jump to Azeroth World Map", "|cff55ff55ЛКМ:|r Открыть глобальную карту Азерота"), 0.9, 0.9, 0.9)
         end
-        GameTooltip:AddLine(L("|cff55ff55Right-Click / Ctrl-Click:|r Cycle Layout (MAWM -> Hybrid -> Blizzard)", "|cff55ff55ПКМ / Ctrl+Клик:|r Сменить раскладку (MAWM -> Гибрид -> Blizzard)"), 0.9, 0.9, 0.9)
-        GameTooltip:AddLine(L("|cff55ff55Shift-Click:|r Toggle Ship & Zeppelin Routes", "|cff55ff55Shift+Клик:|r Вкл/выкл маршруты кораблей и дирижаблей"), 0.9, 0.9, 0.9)
-        GameTooltip:AddLine(L("|cff55ff55Alt-Click:|r Toggle Client Language / EN", "|cff55ff55Alt+Клик:|r Сменить язык карты (Клиент / EN)"), 0.9, 0.9, 0.9)
-        GameTooltip:AddLine(L("|cff55ff55Gear Button / Middle-Click:|r Open Settings Window", "|cff55ff55Шестерёнка / СКМ:|r Открыть окно настроек MAWM"), 0.9, 0.9, 0.9)
-        GameTooltip:Show()
+        tip:AddLine(L("|cff55ff55Right-Click / Ctrl-Click:|r Cycle Layout (MAWM -> Hybrid -> Blizzard)", "|cff55ff55ПКМ / Ctrl+Клик:|r Сменить раскладку (MAWM -> Гибрид -> Blizzard)"), 0.9, 0.9, 0.9)
+        tip:AddLine(L("|cff55ff55Shift-Click:|r Toggle Ship & Zeppelin Routes", "|cff55ff55Shift+Клик:|r Вкл/выкл маршруты кораблей и дирижаблей"), 0.9, 0.9, 0.9)
+        tip:AddLine(L("|cff55ff55Alt-Click:|r Toggle Client Language / EN", "|cff55ff55Alt+Клик:|r Сменить язык карты (Клиент / EN)"), 0.9, 0.9, 0.9)
+        tip:AddLine(L("|cff55ff55Gear Button / Middle-Click:|r Open Settings Window", "|cff55ff55Шестерёнка / СКМ:|r Открыть окно настроек MAWM"), 0.9, 0.9, 0.9)
+        tip:Show()
     end)
 
     btn:SetScript("OnLeave", function(self)
         self:SetBackdropColor(0.07, 0.05, 0.03, 0.90)
-        GameTooltip:Hide()
+        if MAWMTooltip and MAWMTooltip:GetOwner() == self then
+            MAWMTooltip:Hide()
+        end
     end)
 
     self.ToggleButton = btn
@@ -1020,13 +1249,11 @@ function MAWM:RefreshMap()
     if not canvas then return end
 
     local mapID = WorldMapFrame:GetMapID()
-    if mapID == AZEROTH_MAP_ID and MAWM_DB and MAWM_DB.enabled then
+    if SafeNotSecret(mapID) and mapID == AZEROTH_MAP_ID and MAWM_DB and MAWM_DB.enabled then
         canvas:UpdateTileLayout()
         canvas:Show()
-        SetStockHighlightSuppressed(true)
     else
         canvas:Hide()
-        SetStockHighlightSuppressed(false)
     end
 end
 
@@ -1144,11 +1371,8 @@ SlashCmdList["MAWM"] = function(msg)
             end
         end
     elseif cmd == "open" or cmd == "map" then
-        if not WorldMapFrame:IsShown() then
-            ToggleWorldMap()
-        end
-        WorldMapFrame:SetMapID(AZEROTH_MAP_ID)
         MAWM_DB.enabled = true
+        SafeOpenWorldMap(AZEROTH_MAP_ID)
     elseif cmd == "help" then
         if MAWM.ToggleConfigWindow then
             MAWM:ToggleConfigWindow()
@@ -1277,6 +1501,9 @@ local function EnsureControlCenter()
     end
 
     controlFrame = CreateFrame("Frame", "MAWMControlCenter", UIParent, "BackdropTemplate")
+    if type(_G.UISpecialFrames) == "table" then
+        table.insert(_G.UISpecialFrames, "MAWMControlCenter")
+    end
     controlFrame:SetSize(840, 560)
     controlFrame:SetPoint("CENTER")
     controlFrame:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -1346,11 +1573,8 @@ local function EnsureControlCenter()
     local openMapBtn = CreateElvButton(topBar, 145, 26, "")
     openMapBtn:SetPoint("RIGHT", langTopBtn, "LEFT", -6, 0)
     openMapBtn:SetScript("OnClick", function()
-        if not WorldMapFrame:IsShown() then
-            ToggleWorldMap()
-        end
-        WorldMapFrame:SetMapID(MAWM.AZEROTH_MAP_ID or 947)
         MAWM_DB.enabled = true
+        SafeOpenWorldMap(MAWM.AZEROTH_MAP_ID or 947)
         MAWM:RefreshMap()
         controlFrame:RefreshUI()
     end)
@@ -1881,7 +2105,7 @@ local function UpdateMinimapButtonPosition()
     end
     local angle = math.rad(tonumber(MAWM_DB and MAWM_DB.minimapAngle) or 225)
     local okW, rawW = pcall(_G.Minimap.GetWidth, _G.Minimap)
-    local mmW = (okW and type(rawW) == "number" and rawW > 0) and rawW or 140
+    local mmW = (okW and SafeNotSecret(rawW) and type(rawW) == "number" and rawW > 0) and rawW or 140
     local radius = (mmW / 2) + 8
     local x = math.cos(angle) * radius
     local y = math.sin(angle) * radius
@@ -1937,18 +2161,20 @@ local function CreateMAWMMinimapButton()
 
     btn:SetScript("OnEnter", function(self)
         if self.border then self.border:SetColorTexture(1.0, 0.86, 0.30, 1.0) end
-        if _G.GameTooltip then
-            _G.GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-            _G.GameTooltip:AddLine("|cffffd100MAWM v" .. tostring(MAWM.VERSION) .. "|r — Most Accurate World Map")
-            _G.GameTooltip:AddLine(L("|cff55ff55Left-Click:|r Open MAWM Control Center", "|cff55ff55ЛКМ:|r Открыть окно настроек MAWM"), 0.9, 0.9, 0.9)
-            _G.GameTooltip:AddLine(L("|cff55ff55Right-Click:|r Continent Scale Sliders", "|cff55ff55ПКМ:|r Ползунки размеров материков"), 0.9, 0.9, 0.9)
-            _G.GameTooltip:AddLine(L("|cff55ff55Shift-Click:|r Toggle Ship & Zeppelin Routes", "|cff55ff55Shift+Клик:|r Вкл/выкл маршруты кораблей и дирижаблей"), 0.9, 0.9, 0.9)
-            _G.GameTooltip:Show()
-        end
+        local tip = EnsureMAWMTooltip()
+        tip:SetOwner(self, "ANCHOR_LEFT", -4, 0)
+        tip:ClearLines()
+        tip:AddLine("|cffffd100MAWM v" .. tostring(MAWM.VERSION) .. "|r — Most Accurate World Map")
+        tip:AddLine(L("|cff55ff55Left-Click:|r Open MAWM Control Center", "|cff55ff55ЛКМ:|r Открыть окно настроек MAWM"), 0.9, 0.9, 0.9)
+        tip:AddLine(L("|cff55ff55Right-Click:|r Continent Scale Sliders", "|cff55ff55ПКМ:|r Ползунки размеров материков"), 0.9, 0.9, 0.9)
+        tip:AddLine(L("|cff55ff55Shift-Click:|r Toggle Ship & Zeppelin Routes", "|cff55ff55Shift+Клик:|r Вкл/выкл маршруты кораблей и дирижаблей"), 0.9, 0.9, 0.9)
+        tip:Show()
     end)
     btn:SetScript("OnLeave", function(self)
         if self.border then self.border:SetColorTexture(0.85, 0.68, 0.24, 0.90) end
-        if _G.GameTooltip then _G.GameTooltip:Hide() end
+        if MAWMTooltip and MAWMTooltip:GetOwner() == self then
+            MAWMTooltip:Hide()
+        end
     end)
 
     btn:SetScript("OnDragStart", function(self)
@@ -1958,7 +2184,7 @@ local function CreateMAWMMinimapButton()
             local okC, mx, my = pcall(_G.Minimap.GetCenter, _G.Minimap)
             local okP, cx, cy = pcall(_G.GetCursorPosition)
             local okS, scale = pcall(_G.Minimap.GetEffectiveScale, _G.Minimap)
-            if not okC or not okP or not okS or not scale or scale <= 0 then return end
+            if not okC or not okP or not okS or not SafeNotSecret(mx) or not SafeNotSecret(my) or not SafeNotSecret(cx) or not SafeNotSecret(cy) or not SafeNotSecret(scale) or type(scale) ~= "number" or scale <= 0 then return end
             cx, cy = cx / scale, cy / scale
             MAWM_DB = MAWM_DB or {}
             MAWM_DB.minimapAngle = math.deg(math.atan2(cy - my, cx - mx))
