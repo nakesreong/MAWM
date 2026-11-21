@@ -358,52 +358,64 @@ MAWM.LORE_BADGES = {
 -- ============================================================================
 MAWM.PORTS = {
     Stormwind = {
-        cont = "EasternKingdoms", u = 0.315, v = 0.655,
+        cont = "EasternKingdoms", u = 0.315, v = 0.655, uiMapID = 84,
         nameEN = "Stormwind Harbor", nameRU = "Гавань Штормграда",
+        zoneEN = "Stormwind City",   zoneRU = "Штормград",
     },
     Boralus = {
-        cont = "KulTiras", u = 0.685, v = 0.550,
+        cont = "KulTiras", u = 0.685, v = 0.550, uiMapID = 1161,
         nameEN = "Boralus Harbor (Tiragarde Sound)", nameRU = "Гавань Боралуса (Тирагардское поморье)",
+        zoneEN = "Boralus",                          zoneRU = "Боралус",
     },
     ValianceKeep = {
-        cont = "Northrend", u = 0.180, v = 0.740,
+        cont = "Northrend", u = 0.180, v = 0.740, uiMapID = 114,
         nameEN = "Valiance Keep (Borean Tundra)", nameRU = "Крепость Отваги (Борейская тундра)",
+        zoneEN = "Borean Tundra",                 zoneRU = "Борейская тундра",
     },
     WakingShores = {
-        cont = "DragonIsles", u = 0.480, v = 0.340,
+        cont = "DragonIsles", u = 0.480, v = 0.340, uiMapID = 2022,
         nameEN = "Dragonscale Basecamp (Waking Shores)", nameRU = "Берега Пробуждения (Драконьи острова)",
+        zoneEN = "The Waking Shores",                    zoneRU = "Берега Пробуждения",
     },
     Orgrimmar = {
-        cont = "Kalimdor", u = 0.725, v = 0.440,
+        cont = "Kalimdor", u = 0.725, v = 0.440, uiMapID = 85,
         nameEN = "Orgrimmar Zeppelin Towers (Durotar)", nameRU = "Башни дирижаблей Оргриммара (Дуротар)",
+        zoneEN = "Orgrimmar",                           zoneRU = "Оргриммар",
     },
     EchoIsles = {
-        cont = "Kalimdor", u = 0.740, v = 0.510,
+        cont = "Kalimdor", u = 0.740, v = 0.510, uiMapID = 1,
         nameEN = "Echo Isles Dock (Durotar)", nameRU = "Пристань Островов Эха (Дуротар)",
+        zoneEN = "Durotar",                   zoneRU = "Дуротар",
     },
     Tirisfal = {
-        cont = "EasternKingdoms", u = 0.525, v = 0.285,
+        cont = "EasternKingdoms", u = 0.525, v = 0.285, uiMapID = 18,
         nameEN = "Tirisfal Glades / Brill (Undercity)", nameRU = "Тирисфальские леса / Брилл (Подгород)",
+        zoneEN = "Tirisfal Glades",                     zoneRU = "Тирисфальские леса",
     },
     Gromgol = {
-        cont = "EasternKingdoms", u = 0.310, v = 0.805,
+        cont = "EasternKingdoms", u = 0.310, v = 0.805, uiMapID = 50,
         nameEN = "Grom'gol Base Camp (Stranglethorn)", nameRU = "Лагерь Гром'гол (Тернистая долина)",
+        zoneEN = "Northern Stranglethorn",             zoneRU = "Северная Тернистая долина",
     },
     WarsongHold = {
-        cont = "Northrend", u = 0.140, v = 0.650,
+        cont = "Northrend", u = 0.140, v = 0.650, uiMapID = 114,
         nameEN = "Warsong Hold (Borean Tundra)", nameRU = "Крепость Песни Войны (Борейская тундра)",
+        zoneEN = "Borean Tundra",                zoneRU = "Борейская тундра",
     },
     Dazaralor = {
-        cont = "Zandalar", u = 0.585, v = 0.745,
+        cont = "Zandalar", u = 0.585, v = 0.745, uiMapID = 1165,
         nameEN = "Port of Zandalar (Dazar'alor)", nameRU = "Порт Зандалара (Дазар'алор)",
+        zoneEN = "Dazar'alor",                    zoneRU = "Дазар'алор",
     },
     Ratchet = {
-        cont = "Kalimdor", u = 0.680, v = 0.545,
+        cont = "Kalimdor", u = 0.680, v = 0.545, uiMapID = 10,
         nameEN = "Ratchet (Northern Barrens)", nameRU = "Кабестан (Северные Степи)",
+        zoneEN = "Northern Barrens",           zoneRU = "Северные Степи",
     },
     BootyBay = {
-        cont = "EasternKingdoms", u = 0.415, v = 0.885,
+        cont = "EasternKingdoms", u = 0.415, v = 0.885, uiMapID = 210,
         nameEN = "Booty Bay (Cape of Stranglethorn)", nameRU = "Пиратская Бухта (Мыс Тернистой долины)",
+        zoneEN = "The Cape of Stranglethorn",         zoneRU = "Мыс Тернистой долины",
     },
 }
 
